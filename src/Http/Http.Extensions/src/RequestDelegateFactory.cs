@@ -14,6 +14,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Components.Endpoints.Binding;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Http.Json;
@@ -36,6 +37,7 @@ namespace Microsoft.AspNetCore.Http;
 public static partial class RequestDelegateFactory
 {
     private static readonly ParameterBindingMethodCache ParameterBindingMethodCache = new();
+    private static readonly FormDataMapperOptions FormDataMapperOptions = new();
 
     private static readonly MethodInfo ExecuteTaskWithEmptyResultMethod = typeof(RequestDelegateFactory).GetMethod(nameof(ExecuteTaskWithEmptyResult), BindingFlags.NonPublic | BindingFlags.Static)!;
     private static readonly MethodInfo ExecuteValueTaskWithEmptyResultMethod = typeof(RequestDelegateFactory).GetMethod(nameof(ExecuteValueTaskWithEmptyResult), BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -112,6 +114,9 @@ public static partial class RequestDelegateFactory
     private static readonly MemberExpression FilterContextHttpContextResponseExpr = Expression.Property(FilterContextHttpContextExpr, typeof(HttpContext).GetProperty(nameof(HttpContext.Response))!);
     private static readonly MemberExpression FilterContextHttpContextStatusCodeExpr = Expression.Property(FilterContextHttpContextResponseExpr, typeof(HttpResponse).GetProperty(nameof(HttpResponse.StatusCode))!);
     private static readonly ParameterExpression InvokedFilterContextExpr = Expression.Parameter(typeof(EndpointFilterInvocationContext), "filterContext");
+
+    private static readonly ConstructorInfo FormDataReaderConstructor = typeof(FormDataReader).GetConstructor(new[] { typeof(IFormCollection), typeof(CultureInfo) })!;
+    private static readonly MethodInfo FormDataMapperMap = typeof(FormDataMapper).GetMethod(nameof(FormDataMapper.Map))!;
 
     private static readonly string[] DefaultAcceptsAndProducesContentType = new[] { JsonConstants.JsonContentType };
     private static readonly string[] FormFileContentType = new[] { "multipart/form-data" };
@@ -730,8 +735,14 @@ public static partial class RequestDelegateFactory
                 }
                 return BindParameterFromFormCollection(parameter, factoryContext);
             }
-
-            return BindParameterFromFormItem(parameter, formAttribute.Name ?? parameter.Name, factoryContext);
+            var useSimpleBinding = parameter.ParameterType == typeof(string) ||
+                parameter.ParameterType == typeof(StringValues) ||
+                parameter.ParameterType == typeof(StringValues?) ||
+                ParameterBindingMethodCache.HasTryParseMethod(parameter.ParameterType) ||
+                (parameter.ParameterType.IsArray && ParameterBindingMethodCache.HasTryParseMethod(parameter.ParameterType.GetElementType()!));
+            return useSimpleBinding
+                ? BindParameterFromFormItem(parameter, formAttribute.Name ?? parameter.Name, factoryContext)
+                : BindComplexParameterFromFormItem(parameter, formAttribute.Name ?? parameter.Name, factoryContext);
         }
         else if (parameter.CustomAttributes.Any(a => typeof(IFromServiceMetadata).IsAssignableFrom(a.AttributeType)))
         {
@@ -1941,6 +1952,35 @@ public static partial class RequestDelegateFactory
             valueExpression,
             factoryContext,
             "form");
+    }
+
+    private static Expression BindComplexParameterFromFormItem(
+        ParameterInfo parameter,
+        string key,
+        RequestDelegateFactoryContext factoryContext)
+    {
+        factoryContext.FirstFormRequestBodyParameter ??= parameter;
+        factoryContext.TrackedParameters.Add(key, RequestDelegateFactoryConstants.FormAttribute);
+        factoryContext.ReadForm = true;
+
+        // var name_local;
+        // var name_reader;
+        var formArgument = Expression.Variable(parameter.ParameterType, $"{parameter.Name}_local");
+        var formReader = Expression.Variable(typeof(FormDataReader), $"{parameter.Name}_reader");
+
+        // name_reader = new FormDataReader(context.Request.Form, CultureInfo.InvariantCulture);
+        var initializeReaderExpr = Expression.Assign(formReader, Expression.New(FormDataReaderConstructor, FormExpr, Expression.Constant(CultureInfo.InvariantCulture)));
+        // FormDataMapper.Map<string>(name_reader, FormDataMapperOptions);
+        var invokeMapMethodExpr = Expression.Call(
+            FormDataMapperMap.MakeGenericMethod(parameter.ParameterType),
+            formReader,
+            Expression.Constant(FormDataMapperOptions));
+
+        return Expression.Block(
+            new[] { formArgument, formReader },
+            initializeReaderExpr,
+            Expression.Assign(formArgument, invokeMapMethodExpr)
+        );
     }
 
     private static Expression BindParameterFromFormFiles(

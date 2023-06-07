@@ -3,16 +3,16 @@
 
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using Microsoft.Extensions.Primitives;
+using Microsoft.AspNetCore.Http;
 
 namespace Microsoft.AspNetCore.Components.Endpoints.Binding;
 
 internal struct FormDataReader
 {
-    private readonly IReadOnlyDictionary<string, StringValues> _formCollection;
+    private readonly IFormCollection _formCollection;
     private string _prefix;
 
-    public FormDataReader(IReadOnlyDictionary<string, StringValues> formCollection, CultureInfo culture)
+    public FormDataReader(IFormCollection formCollection, CultureInfo culture)
     {
         _formCollection = formCollection;
         _prefix = "";

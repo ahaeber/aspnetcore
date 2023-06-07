@@ -8,6 +8,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Components.Binding;
 using Microsoft.AspNetCore.Components.Endpoints.Binding;
 using Microsoft.AspNetCore.Components.Forms;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Primitives;
 
 namespace Microsoft.AspNetCore.Components.Endpoints;
@@ -65,7 +66,7 @@ internal sealed class DefaultFormValuesSupplier : IFormValueSupplier
         _method.MakeGenericMethod(type)
         .CreateDelegate<Func<IReadOnlyDictionary<string, StringValues>, FormDataMapperOptions, string, object>>();
 
-    private static object? DeserializeCore<T>(IReadOnlyDictionary<string, StringValues> form, FormDataMapperOptions options, string value)
+    private static object? DeserializeCore<T>(IFormCollection form, FormDataMapperOptions options, string value)
     {
         // Form values are parsed according to the culture of the request, which is set to the current culture by the localization middleware.
         // Some form input types use the invariant culture when sending the data to the server. For those cases, we'll
