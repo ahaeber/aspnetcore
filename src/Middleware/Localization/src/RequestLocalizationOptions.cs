@@ -74,7 +74,7 @@ public class RequestLocalizationOptions
     /// Defaults to <c>true</c>;
     /// </summary>
     /// <remarks>
-    /// Note that the parent culture check is done using ony the culture name.
+    /// Note that the parent culture check is done using only the culture name.
     /// </remarks>
     /// <example>
     /// If this property is <c>true</c> and the application is configured to support the UI culture "fr", but not
